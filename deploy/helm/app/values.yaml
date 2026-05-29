@@ -1,0 +1,32 @@
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/owner/rsoi-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+
+env: {}
+secretEnv: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  host: example.com
+  path: /
+  pathType: Prefix
+  annotations: {}
+  tls: []
+
+resources: {}
+
+probes:
+  enabled: true
+  path: /manage/health

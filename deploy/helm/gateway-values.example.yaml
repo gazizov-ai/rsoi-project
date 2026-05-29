@@ -1,0 +1,22 @@
+nameOverride: gateway
+image:
+  repository: ghcr.io/owner/rsoi-gateway
+  tag: latest
+containerPort: 8080
+env:
+  PORT: "8080"
+  RESERVATION_URL: http://reservation
+  PAYMENT_URL: http://payment
+  LOYALTY_URL: http://loyalty
+  IDENTITY_URL: http://identity
+  IDENTITY_PUBLIC_URL: https://identity.example.com
+  STATISTICS_URL: http://statistics
+  JWT_ISSUER: https://identity.example.com
+  CLIENT_ID: rsoi-spa
+  REDIRECT_URI: https://api.example.com/api/v1/callback
+  UI_URL: https://app.example.com
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_TOPIC: rsoi.events
+ingress:
+  enabled: true
+  host: api.example.com

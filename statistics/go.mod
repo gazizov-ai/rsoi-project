@@ -1,12 +1,11 @@
-module github.com/gazizov-ai/rsoi-project/gateway
+module github.com/gazizov-ai/rsoi-project/statistics
 
 go 1.23.0
-
-require github.com/go-chi/chi/v5 v5.2.5
 
 require (
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/gazizov-ai/rsoi-project/common v0.0.0
+	github.com/lib/pq v1.12.3
 	github.com/segmentio/kafka-go v0.4.47
 )
 

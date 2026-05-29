@@ -14,7 +14,7 @@ func main() {
 		log.Fatalf("failed to read env: %v", err)
 	}
 
-	r := transport.NewRouter()
+	r := transport.NewRouter(cfg)
 
 	srv := &http.Server{
 		Addr:    cfg.Address(),

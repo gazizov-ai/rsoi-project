@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rsoi-service
+description: Universal chart for RSOI backend and UI services.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
