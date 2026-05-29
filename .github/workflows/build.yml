@@ -136,7 +136,7 @@ jobs:
               solvers:
                 - http01:
                     ingress:
-                      class: nginx
+                      ingressClassName: nginx
           EOF
 
           kubectl -n $NAMESPACE delete pod postgres-grants --ignore-not-found
@@ -152,6 +152,7 @@ jobs:
           echo "APP_HOST=$APP_HOST" >> $GITHUB_ENV
           echo "API_HOST=$API_HOST" >> $GITHUB_ENV
           echo "IDENTITY_HOST=$IDENTITY_HOST" >> $GITHUB_ENV
+          kubectl -n $NAMESPACE delete order,challenge --all --ignore-not-found || true
 
           helm upgrade --install identity deploy/helm/app -n $NAMESPACE \
             --set nameOverride=identity \
@@ -173,7 +174,6 @@ jobs:
             --set ingress.className=nginx \
             --set ingress.host=$IDENTITY_HOST \
             --set-string "ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-http" \
-            --set-string "ingress.annotations.nginx\.ingress\.kubernetes\.io/ssl-redirect=true" \
             --set "ingress.tls[0].hosts[0]=$IDENTITY_HOST" \
             --set ingress.tls[0].secretName=identity-tls
 
@@ -243,7 +243,6 @@ jobs:
             --set ingress.className=nginx \
             --set ingress.host=$API_HOST \
             --set-string "ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-http" \
-            --set-string "ingress.annotations.nginx\.ingress\.kubernetes\.io/ssl-redirect=true" \
             --set "ingress.tls[0].hosts[0]=$API_HOST" \
             --set ingress.tls[0].secretName=gateway-tls
 
@@ -257,7 +256,6 @@ jobs:
             --set ingress.className=nginx \
             --set ingress.host=$APP_HOST \
             --set-string "ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-http" \
-            --set-string "ingress.annotations.nginx\.ingress\.kubernetes\.io/ssl-redirect=true" \
             --set "ingress.tls[0].hosts[0]=$APP_HOST" \
             --set ingress.tls[0].secretName=ui-tls
 
@@ -269,12 +267,21 @@ jobs:
           kubectl -n $NAMESPACE rollout status deploy/gateway --timeout=5m
           kubectl -n $NAMESPACE rollout status deploy/ui --timeout=5m
 
+      - name: Wait for HTTPS certificates
+        if: github.event_name == 'push'
+        env:
+          NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+        run: |
+          kubectl -n $NAMESPACE get certificate || true
           for cert in identity-tls gateway-tls ui-tls; do
-            for _ in {1..60}; do
-              kubectl -n $NAMESPACE get certificate/$cert >/dev/null 2>&1 && break
-              sleep 5
-            done
-            kubectl -n $NAMESPACE wait --for=condition=Ready certificate/$cert --timeout=10m
+            echo "Waiting for certificate/$cert"
+            kubectl -n $NAMESPACE wait --for=condition=Ready certificate/$cert --timeout=10m || {
+              kubectl -n $NAMESPACE describe certificate/$cert || true
+              kubectl -n $NAMESPACE get order,challenge || true
+              kubectl -n $NAMESPACE describe order,challenge || true
+              kubectl -n cert-manager logs deploy/cert-manager --tail=100 || true
+              exit 1
+            }
           done
 
           echo "UI:       https://$APP_HOST"
