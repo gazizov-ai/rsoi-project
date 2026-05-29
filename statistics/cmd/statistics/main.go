@@ -157,10 +157,26 @@ func (s *server) report(w http.ResponseWriter, r *http.Request) {
 	}
 	var total int64
 	_ = s.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events`).Scan(&total)
+	var today int64
+	_ = s.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events WHERE created_at >= date_trunc('day', now())`).Scan(&today)
+	var grossRevenue int64
+	_ = s.db.QueryRowContext(r.Context(), `
+SELECT COALESCE(SUM((payload->>'price')::bigint), 0)
+FROM events
+WHERE type = 'reservation.created' AND payload ? 'price'
+`).Scan(&grossRevenue)
+	recentEvents, err := s.recentEvents(r.Context())
+	if err != nil {
+		httputil.Error(w, http.StatusInternalServerError, "failed to build report")
+		return
+	}
 	httputil.JSON(w, http.StatusOK, map[string]any{
 		"totalEvents":  total,
+		"todayEvents":  today,
+		"grossRevenue": grossRevenue,
 		"eventsByType": eventsByType,
 		"eventsByUser": eventsByUser,
+		"recentEvents": recentEvents,
 	})
 }
 
@@ -178,6 +194,39 @@ func (s *server) groupCount(ctx context.Context, column string) (map[string]int6
 			return nil, err
 		}
 		result[key] = count
+	}
+	return result, rows.Err()
+}
+
+func (s *server) recentEvents(ctx context.Context) ([]map[string]any, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, type, username, payload, created_at
+FROM events
+ORDER BY created_at DESC
+LIMIT 10
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var eventType, username string
+		var rawPayload []byte
+		var createdAt time.Time
+		if err := rows.Scan(&id, &eventType, &username, &rawPayload, &createdAt); err != nil {
+			return nil, err
+		}
+		payload := map[string]any{}
+		_ = json.Unmarshal(rawPayload, &payload)
+		result = append(result, map[string]any{
+			"id":        id,
+			"type":      eventType,
+			"username":  username,
+			"payload":   payload,
+			"createdAt": createdAt.Format(time.RFC3339),
+		})
 	}
 	return result, rows.Err()
 }

@@ -1,7 +1,18 @@
 const { useEffect, useMemo, useState } = React;
 
-const API = "http://localhost:8080/api/v1";
+const API = window.__APP_CONFIG__?.API_BASE_URL || defaultApiBaseUrl();
 const BRONZE_LOYALTY = { status: "BRONZE", discount: 5, reservationCount: 0 };
+
+function defaultApiBaseUrl() {
+  const { protocol, hostname } = window.location;
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "http://localhost:8080/api/v1";
+  }
+  if (hostname.startsWith("app.")) {
+    return `${protocol}//api.${hostname.slice(4)}/api/v1`;
+  }
+  return `${window.location.origin}/api/v1`;
+}
 
 function token() {
   return localStorage.getItem("access_token") || "";
@@ -73,6 +84,24 @@ function friendlyError(message) {
   if (text.includes("invalid enddate")) return "Дата выезда должна быть позже даты заезда.";
   if (text.includes("failed to fetch")) return "Нет связи с сервером. Проверьте, что сервисы запущены.";
   return message || "Что-то пошло не так. Попробуйте еще раз.";
+}
+
+function eventLabel(type) {
+  const labels = {
+    "reservation.created": "Бронирование создано",
+    "reservation.canceled": "Бронирование отменено",
+  };
+  return labels[type] || type || "Событие";
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function starsLabel(value) {
@@ -488,6 +517,8 @@ function Admin() {
   const [stats, setStats] = useState(null);
   const [statsError, setStatsError] = useState("");
   const [users, setUsers] = useState([]);
+  const [userError, setUserError] = useState("");
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ username: "", email: "", password: "", role: "User" });
   const load = () => {
     api("/statistics")
@@ -499,7 +530,15 @@ function Admin() {
         setStats(null);
         setStatsError(friendlyError(err.message));
       });
-    api("/users").then(setUsers).catch(() => setUsers([]));
+    api("/users")
+      .then((data) => {
+        setUsers(data || []);
+        setUserError("");
+      })
+      .catch((err) => {
+        setUsers([]);
+        setUserError(friendlyError(err.message));
+      });
   };
   useEffect(() => {
     load();
@@ -507,19 +546,31 @@ function Admin() {
 
   async function create(e) {
     e.preventDefault();
-    await api("/users", { method: "POST", body: JSON.stringify(form) });
-    setForm({ username: "", email: "", password: "", role: "User" });
-    load();
+    setCreating(true);
+    setUserError("");
+    try {
+      await api("/users", { method: "POST", body: JSON.stringify(form) });
+      setForm({ username: "", email: "", password: "", role: "User" });
+      load();
+    } catch (err) {
+      setUserError(friendlyError(err.message));
+    } finally {
+      setCreating(false);
+    }
   }
 
   return (
     <>
-      <section className="card">
-        <h2>Статистика</h2>
-        {statsError ? <div className="notice warning">{statsError}</div> : <pre>{JSON.stringify(stats, null, 2)}</pre>}
-      </section>
-      <section className="card">
-        <h2>Пользователи</h2>
+      <AdminStats stats={stats} error={statsError} onRefresh={load} />
+      <section className="admin-users card">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Доступ</span>
+            <h2>Пользователи</h2>
+          </div>
+          <span className="badge base">{users.length}</span>
+        </div>
+        {userError && <div className="notice warning">{userError}</div>}
         <form className="form" onSubmit={create}>
           <div className="form-grid">
             <label>Логин<input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required /></label>
@@ -527,14 +578,108 @@ function Admin() {
             <label>Пароль<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></label>
             <label>Роль<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}><option value="User">Пользователь</option><option value="Admin">Администратор</option></select></label>
           </div>
-          <button className="primary" type="submit">Создать</button>
+          <button className="primary" type="submit" disabled={creating}>{creating ? "Создаем..." : "Создать"}</button>
         </form>
       </section>
       <table className="table">
         <thead><tr><th>ID</th><th>Логин</th><th>Email</th><th>Роль</th></tr></thead>
-        <tbody>{users.map((u) => <tr key={u.id}><td>{u.id}</td><td>{u.username}</td><td>{u.email}</td><td>{statusLabel(u.role)}</td></tr>)}</tbody>
+        <tbody>{users.map((u) => <tr key={u.id}><td>{u.id}</td><td>{u.username}</td><td>{u.email}</td><td><span className={`badge ${statusClass(u.role)}`}>{statusLabel(u.role)}</span></td></tr>)}</tbody>
       </table>
     </>
+  );
+}
+
+function AdminStats({ stats, error, onRefresh }) {
+  if (error) {
+    return <section className="card"><div className="notice warning">{error}</div></section>;
+  }
+  if (!stats) {
+    return <section className="card"><div className="notice">Загружаем статистику...</div></section>;
+  }
+
+  const byType = stats.eventsByType || {};
+  const byUser = stats.eventsByUser || {};
+  const created = Number(byType["reservation.created"] || 0);
+  const canceled = Number(byType["reservation.canceled"] || 0);
+  const conversion = created ? Math.max(0, Math.round(((created - canceled) / created) * 100)) : 0;
+  const topUsers = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const eventTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <section className="admin-dashboard">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Статистика</span>
+          <h2>Операционная сводка</h2>
+        </div>
+        <button className="secondary" type="button" onClick={onRefresh}>Обновить</button>
+      </div>
+      <div className="kpi-grid">
+        <StatCard label="Всего событий" value={stats.totalEvents || 0} />
+        <StatCard label="Сегодня" value={stats.todayEvents || 0} />
+        <StatCard label="Бронирования" value={created} />
+        <StatCard label="Выручка" value={formatMoney(stats.grossRevenue || 0)} />
+      </div>
+      <div className="analytics-grid">
+        <section className="card">
+          <div className="section-heading compact">
+            <h3>Типы событий</h3>
+            <span className="badge base">{conversion}% активных</span>
+          </div>
+          <BarList items={eventTypes} empty="Событий пока нет" label={eventLabel} />
+        </section>
+        <section className="card">
+          <div className="section-heading compact">
+            <h3>Активные пользователи</h3>
+          </div>
+          <BarList items={topUsers} empty="Активности пока нет" />
+        </section>
+      </div>
+      <section className="card">
+        <div className="section-heading compact">
+          <h3>Последние события</h3>
+        </div>
+        <div className="event-list">
+          {(stats.recentEvents || []).length ? stats.recentEvents.map((event) => (
+            <div className="event-row" key={event.id || `${event.type}-${event.createdAt}`}>
+              <span className={`event-dot ${event.type === "reservation.canceled" ? "muted" : "success"}`}></span>
+              <div>
+                <strong>{eventLabel(event.type)}</strong>
+                <span>{event.username}</span>
+              </div>
+              <time>{formatDateTime(event.createdAt)}</time>
+            </div>
+          )) : <div className="notice">Журнал событий пуст.</div>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="stat-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function BarList({ items, empty, label = (value) => value }) {
+  if (!items.length) return <div className="notice">{empty}</div>;
+  const max = Math.max(...items.map(([, count]) => Number(count || 0)), 1);
+  return (
+    <div className="bar-list">
+      {items.map(([name, count]) => (
+        <div className="bar-row" key={name}>
+          <div>
+            <span>{label(name)}</span>
+            <strong>{count}</strong>
+          </div>
+          <div className="bar-track"><span style={{ width: `${Math.max(8, Math.round((Number(count) / max) * 100))}%` }}></span></div>
+        </div>
+      ))}
+    </div>
   );
 }
 
