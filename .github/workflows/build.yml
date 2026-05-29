@@ -321,7 +321,7 @@ jobs:
       - name: Run baseline API tests
         if: github.event_name == 'push'
         run: |
-          newman run test-collections/deploy-smoke.postman_collection.json \
+          newman run test-collections/end2end.json \
             -e postman-environment.json \
             --folder Baseline \
             --export-environment postman-runtime.json
@@ -339,7 +339,7 @@ jobs:
           trap restore EXIT
           kubectl -n $NAMESPACE scale deploy/loyalty --replicas=0
           kubectl -n $NAMESPACE wait --for=delete pod -l app.kubernetes.io/name=loyalty --timeout=120s || true
-          newman run test-collections/deploy-smoke.postman_collection.json \
+          newman run test-collections/end2end.json \
             -e postman-environment.json \
             --folder "Loyalty fallback" \
             --export-environment postman-runtime.json
@@ -359,7 +359,7 @@ jobs:
           trap restore EXIT
           kubectl -n $NAMESPACE scale deploy/payment --replicas=0
           kubectl -n $NAMESPACE wait --for=delete pod -l app.kubernetes.io/name=payment --timeout=120s || true
-          newman run test-collections/deploy-smoke.postman_collection.json \
+          newman run test-collections/end2end.json \
             -e postman-environment.json \
             --folder "Payment fallback" \
             --export-environment postman-runtime.json
@@ -379,7 +379,7 @@ jobs:
           trap restore EXIT
           kubectl -n $NAMESPACE scale deploy/reservation --replicas=0
           kubectl -n $NAMESPACE wait --for=delete pod -l app.kubernetes.io/name=reservation --timeout=120s || true
-          newman run test-collections/deploy-smoke.postman_collection.json \
+          newman run test-collections/end2end.json \
             -e postman-environment.json \
             --folder "Reservation fallback" \
             --export-environment postman-runtime.json
@@ -391,6 +391,6 @@ jobs:
         if: always() && github.event_name == 'push'
         continue-on-error: true
         run: |
-          newman run test-collections/deploy-smoke.postman_collection.json \
+          newman run test-collections/end2end.json \
             -e postman-environment.json \
             --folder Cleanup
