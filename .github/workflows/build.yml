@@ -102,6 +102,7 @@ jobs:
           DEFAULT_USER_EMAIL: ${{ secrets.DEFAULT_USER_EMAIL }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           IMAGE_PREFIX: ${{ vars.IMAGE_PREFIX }}
           NAMESPACE: ${{ vars.K8S_NAMESPACE }}
@@ -110,6 +111,11 @@ jobs:
           KAFKA_TOPIC: ${{ vars.KAFKA_TOPIC }}
         run: |
           kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl -n $NAMESPACE run postgres-grants --rm -i --restart=Never --image=postgres:15 \
+            --env PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" \
+            --env DB_USER="$DB_USER" \
+            -- sh -c 'for db in identity reservations payments loyalties statistics; do psql -h postgres -U postgres -d "$db" -v ON_ERROR_STOP=1 -c "GRANT USAGE, CREATE ON SCHEMA public TO \"$DB_USER\";"; done'
 
           INGRESS_IP=$(kubectl -n ingress-nginx get svc -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
           APP_HOST=app.$INGRESS_IP.nip.io
