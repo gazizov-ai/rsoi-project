@@ -1,0 +1,564 @@
+{
+  "info": {
+    "_postman_id": "3f7357bd-f4c7-4866-a5b1-c11f81f765d6",
+    "name": "[rsoi][deploy] Hotels Booking Smoke",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const offset = Number(pm.environment.get('dateOffset') || 30);",
+          "const start = new Date(Date.now() + offset * 24 * 60 * 60 * 1000);",
+          "const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);",
+          "pm.environment.set('startDate', start.toISOString().slice(0, 10));",
+          "pm.environment.set('endDate', end.toISOString().slice(0, 10));",
+          "pm.environment.set('dateOffset', String(offset + 2));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Baseline",
+      "item": [
+        {
+          "name": "Get token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('token received', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.access_token).to.be.a('string').and.not.empty;",
+                  "  pm.environment.set('authToken', json.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "scope", "value": "openid profile email", "type": "text" },
+                { "key": "username", "value": "{{username}}", "type": "text" },
+                { "key": "password", "value": "{{password}}", "type": "text" },
+                { "key": "client_id", "value": "{{clientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{clientSecret}}", "type": "text" }
+              ]
+            },
+            "url": "{{identityProviderUrl}}/oauth/token"
+          }
+        },
+        {
+          "name": "Public hotels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('hotels are public and include capacity', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.items).to.be.an('array').and.not.empty;",
+                  "  const hotel = json.items[0];",
+                  "  pm.expect(hotel.hotelUid).to.be.a('string').and.not.empty;",
+                  "  pm.expect(hotel.totalRooms).to.be.a('number');",
+                  "  pm.expect(hotel.occupiedRooms).to.be.a('number');",
+                  "  pm.expect(hotel.availableRooms).to.be.a('number');",
+                  "  pm.environment.set('hotelUid', hotel.hotelUid);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serviceUrl}}/api/v1/hotels?page=1&size=10"
+          }
+        },
+        {
+          "name": "Protected create without token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('create requires token', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"hotelUid\":\"{{hotelUid}}\",\"startDate\":\"{{startDate}}\",\"endDate\":\"{{endDate}}\"}"
+            },
+            "url": "{{serviceUrl}}/api/v1/reservations"
+          }
+        },
+        {
+          "name": "Create reservation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reservation created with payment', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.reservationUid).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.status).to.eql('PAID');",
+                  "  pm.expect(json.payment).to.be.an('object');",
+                  "  pm.expect(json.payment.status).to.eql('PAID');",
+                  "  pm.environment.set('reservationUid', json.reservationUid);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"hotelUid\":\"{{hotelUid}}\",\"startDate\":\"{{startDate}}\",\"endDate\":\"{{endDate}}\"}"
+            },
+            "url": "{{serviceUrl}}/api/v1/reservations"
+          }
+        },
+        {
+          "name": "Get reservation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reservation details are available', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.reservationUid).to.eql(pm.environment.get('reservationUid'));",
+                  "  pm.expect(json.payment).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/reservations/{{reservationUid}}"
+          }
+        },
+        {
+          "name": "Get profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('profile contains loyalty and reservations', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.username).to.eql(pm.environment.get('username'));",
+                  "  pm.expect(json.loyalty).to.be.an('object');",
+                  "  pm.expect(json.reservations).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Loyalty fallback",
+      "item": [
+        {
+          "name": "Get token",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "scope", "value": "openid profile email", "type": "text" },
+                { "key": "username", "value": "{{username}}", "type": "text" },
+                { "key": "password", "value": "{{password}}", "type": "text" },
+                { "key": "client_id", "value": "{{clientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{clientSecret}}", "type": "text" }
+              ]
+            },
+            "url": "{{identityProviderUrl}}/oauth/token"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('token received', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.environment.set('authToken', pm.response.json().access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Loyalty is bronze fallback",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/loyalty"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('loyalty fallback is bronze', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql('BRONZE');",
+                  "  pm.expect(json.discount).to.eql(5);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create reservation with loyalty down",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"hotelUid\":\"{{hotelUid}}\",\"startDate\":\"{{startDate}}\",\"endDate\":\"{{endDate}}\"}"
+            },
+            "url": "{{serviceUrl}}/api/v1/reservations"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reservation still works with bronze fallback', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.discount).to.eql(5);",
+                  "  pm.environment.set('loyaltyFallbackReservationUid', json.reservationUid);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel loyalty fallback reservation",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/reservations/{{loyaltyFallbackReservationUid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('fallback reservation canceled', function () {",
+                  "  pm.expect([204, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payment fallback",
+      "item": [
+        {
+          "name": "Get token",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "scope", "value": "openid profile email", "type": "text" },
+                { "key": "username", "value": "{{username}}", "type": "text" },
+                { "key": "password", "value": "{{password}}", "type": "text" },
+                { "key": "client_id", "value": "{{clientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{clientSecret}}", "type": "text" }
+              ]
+            },
+            "url": "{{identityProviderUrl}}/oauth/token"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('token received', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.environment.set('authToken', pm.response.json().access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get reservation without payment data",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/reservations/{{reservationUid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reservation degrades when payment is down', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.paymentUnavailable).to.eql(true);",
+                  "  pm.expect(json.payment).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create reservation fails when payment is down",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"hotelUid\":\"{{hotelUid}}\",\"startDate\":\"{{startDate}}\",\"endDate\":\"{{endDate}}\"}"
+            },
+            "url": "{{serviceUrl}}/api/v1/reservations"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('payment is critical for creation', function () {",
+                  "  pm.response.to.have.status(503);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reservation fallback",
+      "item": [
+        {
+          "name": "Get token",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "scope", "value": "openid profile email", "type": "text" },
+                { "key": "username", "value": "{{username}}", "type": "text" },
+                { "key": "password", "value": "{{password}}", "type": "text" },
+                { "key": "client_id", "value": "{{clientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{clientSecret}}", "type": "text" }
+              ]
+            },
+            "url": "{{identityProviderUrl}}/oauth/token"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('token received', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.environment.set('authToken', pm.response.json().access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hotels fail when reservation is down",
+          "request": {
+            "method": "GET",
+            "url": "{{serviceUrl}}/api/v1/hotels?page=1&size=10"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('catalog depends on reservation service', function () {",
+                  "  pm.response.to.have.status(500);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Profile is partially available",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('profile returns fallback when reservation is down', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.reservationsUnavailable).to.eql(true);",
+                  "  pm.expect(json.reservations).to.be.an('array').and.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List reservations fails",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/reservations"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reservation list is unavailable', function () {",
+                  "  pm.response.to.have.status(500);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cleanup",
+      "item": [
+        {
+          "name": "Get token",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password", "type": "text" },
+                { "key": "scope", "value": "openid profile email", "type": "text" },
+                { "key": "username", "value": "{{username}}", "type": "text" },
+                { "key": "password", "value": "{{password}}", "type": "text" },
+                { "key": "client_id", "value": "{{clientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{clientSecret}}", "type": "text" }
+              ]
+            },
+            "url": "{{identityProviderUrl}}/oauth/token"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('token received', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.environment.set('authToken', pm.response.json().access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel baseline reservation",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{serviceUrl}}/api/v1/reservations/{{reservationUid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('baseline reservation canceled', function () {",
+                  "  pm.expect([204, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
