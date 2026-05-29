@@ -109,6 +109,7 @@ jobs:
           CLIENT_ID: ${{ vars.CLIENT_ID }}
           KAFKA_BROKERS: ${{ vars.KAFKA_BROKERS }}
           KAFKA_TOPIC: ${{ vars.KAFKA_TOPIC }}
+          LETSENCRYPT_EMAIL: ${{ vars.LETSENCRYPT_EMAIL }}
         run: |
           kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
@@ -129,10 +130,10 @@ jobs:
             name: letsencrypt-http
           spec:
             acme:
-              email: $ADMIN_EMAIL
+              email: $LETSENCRYPT_EMAIL
               server: https://acme-v02.api.letsencrypt.org/directory
               privateKeySecretRef:
-                name: letsencrypt-http-account-key
+                name: letsencrypt-http-account-key-v2
               solvers:
                 - http01:
                     ingress:
