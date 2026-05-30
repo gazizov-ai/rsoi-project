@@ -43,56 +43,6 @@ if [[ "$KAFKA_BROKERS" == "kafka:9092" ]]; then
 apiVersion: v1
 kind: Service
 metadata:
-  name: zookeeper
-spec:
-  selector:
-    app.kubernetes.io/name: zookeeper
-  ports:
-    - name: client
-      port: 2181
-      targetPort: 2181
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: zookeeper
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: zookeeper
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: zookeeper
-    spec:
-      containers:
-        - name: zookeeper
-          image: confluentinc/cp-zookeeper:7.3.2
-          ports:
-            - containerPort: 2181
-          env:
-            - name: ZOOKEEPER_CLIENT_PORT
-              value: "2181"
-            - name: ZOOKEEPER_TICK_TIME
-              value: "2000"
-          readinessProbe:
-            tcpSocket:
-              port: 2181
-            initialDelaySeconds: 10
-            periodSeconds: 5
-YAML
-  kubectl -n "$NAMESPACE" rollout status deploy/zookeeper --timeout=5m || {
-    kubectl -n "$NAMESPACE" describe deploy/zookeeper || true
-    kubectl -n "$NAMESPACE" describe pod -l app.kubernetes.io/name=zookeeper || true
-    kubectl -n "$NAMESPACE" logs deploy/zookeeper --tail=100 || true
-    exit 1
-  }
-
-  cat <<YAML | kubectl -n "$NAMESPACE" apply -f -
-apiVersion: v1
-kind: Service
-metadata:
   name: kafka
 spec:
   selector:
@@ -118,34 +68,32 @@ spec:
     spec:
       containers:
         - name: kafka
-          image: confluentinc/cp-kafka:7.3.2
+          image: redpandadata/redpanda:v23.3.10
+          args:
+            - redpanda
+            - start
+            - --mode
+            - dev-container
+            - --smp
+            - "1"
+            - --memory
+            - 512M
+            - --overprovisioned
+            - --node-id
+            - "0"
+            - --check=false
+            - --kafka-addr
+            - PLAINTEXT://0.0.0.0:9092
+            - --advertise-kafka-addr
+            - PLAINTEXT://kafka:9092
           ports:
             - containerPort: 9092
-          env:
-            - name: KAFKA_BROKER_ID
-              value: "1"
-            - name: KAFKA_ZOOKEEPER_CONNECT
-              value: zookeeper:2181
-            - name: KAFKA_LISTENERS
-              value: PLAINTEXT://0.0.0.0:9092
-            - name: KAFKA_ADVERTISED_LISTENERS
-              value: PLAINTEXT://kafka:9092
-            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-              value: PLAINTEXT:PLAINTEXT
-            - name: KAFKA_INTER_BROKER_LISTENER_NAME
-              value: PLAINTEXT
-            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-              value: "true"
+            - containerPort: 9644
           readinessProbe:
-            tcpSocket:
-              port: 9092
-            initialDelaySeconds: 20
+            httpGet:
+              path: /v1/status/ready
+              port: 9644
+            initialDelaySeconds: 10
             periodSeconds: 5
 YAML
   kubectl -n "$NAMESPACE" rollout status deploy/kafka --timeout=5m || {
