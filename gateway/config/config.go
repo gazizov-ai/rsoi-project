@@ -25,6 +25,10 @@ type Config struct {
 	UIURL        string `env:"UI_URL" envDefault:"http://localhost:3000"`
 	KafkaBrokers string `env:"KAFKA_BROKERS" envDefault:""`
 	KafkaTopic   string `env:"KAFKA_TOPIC" envDefault:"rsoi.events"`
+
+	KafkaReservationCanceledTopic string `env:"KAFKA_RESERVATION_CANCELED_TOPIC" envDefault:"reservation.canceled"`
+	KafkaReservationCreatedTopic  string `env:"KAFKA_RESERVATION_CREATED_TOPIC" envDefault:"reservation.created"`
+	KafkaPaymentCancelTopic       string `env:"KAFKA_PAYMENT_CANCEL_TOPIC" envDefault:"payment.cancel.requested"`
 }
 
 func Load() (Config, error) {

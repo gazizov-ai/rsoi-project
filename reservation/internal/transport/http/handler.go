@@ -110,10 +110,11 @@ func (h *Handler) GetReservation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateReservation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		HotelUID   string `json:"hotelUid"`
-		PaymentUID string `json:"paymentUid"`
-		StartDate  string `json:"startDate"`
-		EndDate    string `json:"endDate"`
+		ReservationUID string `json:"reservationUid"`
+		HotelUID       string `json:"hotelUid"`
+		PaymentUID     string `json:"paymentUid"`
+		StartDate      string `json:"startDate"`
+		EndDate        string `json:"endDate"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, http.StatusBadRequest, "invalid json")
@@ -129,6 +130,14 @@ func (h *Handler) CreateReservation(w http.ResponseWriter, r *http.Request) {
 		httputil.Error(w, http.StatusBadRequest, "invalid payment uid")
 		return
 	}
+	reservationUID := uuid.New()
+	if req.ReservationUID != "" {
+		reservationUID, err = uuid.Parse(req.ReservationUID)
+		if err != nil {
+			httputil.Error(w, http.StatusBadRequest, "invalid reservation uid")
+			return
+		}
+	}
 	startDate, err := parseDate(req.StartDate)
 	if err != nil {
 		httputil.Error(w, http.StatusBadRequest, "invalid startDate")
@@ -140,7 +149,7 @@ func (h *Handler) CreateReservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims, _ := auth.FromContext(r.Context())
-	view, err := h.svc.CreateReservation(r.Context(), claims.Username, hotelUID, paymentUID, startDate, endDate)
+	view, err := h.svc.CreateReservation(r.Context(), claims.Username, reservationUID, hotelUID, paymentUID, startDate, endDate)
 	if errors.Is(err, errs.ErrHotelNotFound) {
 		httputil.Error(w, http.StatusNotFound, "hotel not found")
 		return

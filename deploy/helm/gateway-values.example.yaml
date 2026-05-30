@@ -17,6 +17,9 @@ env:
   UI_URL: https://app.example.com
   KAFKA_BROKERS: kafka:9092
   KAFKA_TOPIC: rsoi.events
+  KAFKA_RESERVATION_CANCELED_TOPIC: reservation.canceled
+  KAFKA_RESERVATION_CREATED_TOPIC: reservation.created
+  KAFKA_PAYMENT_CANCEL_TOPIC: payment.cancel.requested
 ingress:
   enabled: true
   host: api.example.com

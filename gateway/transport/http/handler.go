@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -215,15 +216,20 @@ func (h *Handler) CreateReservation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var reservation reservationResponse
+	reservationUID := newEventID()
 	createReq := map[string]string{
-		"hotelUid":   req.HotelUID,
-		"paymentUid": payment.PaymentUID,
-		"startDate":  req.StartDate,
-		"endDate":    req.EndDate,
+		"reservationUid": reservationUID,
+		"hotelUid":       req.HotelUID,
+		"paymentUid":     payment.PaymentUID,
+		"startDate":      req.StartDate,
+		"endDate":        req.EndDate,
 	}
 	status, err = h.do(r, http.MethodPost, h.cfg.ReservationURL+"/api/v1/reservations", createReq, &reservation)
 	if err != nil || status != http.StatusCreated {
-		h.cancelPayment(r, payment.PaymentUID)
+		if err := h.publishPaymentCancelFor(r, reservationUID, payment.PaymentUID); err != nil {
+			httputil.Error(w, http.StatusServiceUnavailable, "failed to publish payment cancel event")
+			return
+		}
 		if status == http.StatusConflict {
 			httputil.Error(w, http.StatusConflict, "No rooms available")
 			return
@@ -232,15 +238,11 @@ func (h *Handler) CreateReservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if loyaltyAvailable {
-		var updated loyaltyResponse
-		status, err = h.do(r, http.MethodPost, h.cfg.LoyaltyURL+"/api/v1/loyalty/increase", nil, &updated)
-		if err != nil || status != http.StatusOK {
-			h.cancelReservation(r, reservation.ReservationUID)
-			h.cancelPayment(r, payment.PaymentUID)
-			httputil.Error(w, http.StatusServiceUnavailable, loyaltyServiceUnavailable)
-			return
-		}
+	if err := h.publishReservationCreated(r, reservation, payment.Price, loyalty.Discount); err != nil {
+		h.cancelReservation(r, reservation.ReservationUID)
+		_ = h.publishPaymentCancel(r, reservation)
+		httputil.Error(w, http.StatusServiceUnavailable, "failed to publish reservation created event")
+		return
 	}
 	h.publishEvent(r, "reservation.created", map[string]any{"reservationUid": reservation.ReservationUID, "paymentUid": payment.PaymentUID, "price": payment.Price})
 
@@ -278,17 +280,13 @@ func (h *Handler) CancelReservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err = h.cancelPayment(r, reservation.PaymentUID)
-	if err != nil || status >= 500 {
-		h.retryPaymentCancel(r.Header.Get("Authorization"), reservation.PaymentUID)
-	} else if status != http.StatusNotFound && status >= 300 {
-		h.retryPaymentCancel(r.Header.Get("Authorization"), reservation.PaymentUID)
+	if err := h.publishPaymentCancel(r, reservation); err != nil {
+		httputil.Error(w, http.StatusServiceUnavailable, "failed to publish payment cancel event")
+		return
 	}
-
-	var loyalty loyaltyResponse
-	status, err = h.do(r, http.MethodPost, h.cfg.LoyaltyURL+"/api/v1/loyalty/decrease", nil, &loyalty)
-	if err != nil || status >= 500 {
-		h.retryLoyaltyDecrease(r.Header.Get("Authorization"))
+	if err := h.publishReservationCanceled(r, reservation); err != nil {
+		httputil.Error(w, http.StatusServiceUnavailable, "failed to publish reservation canceled event")
+		return
 	}
 	h.publishEvent(r, "reservation.canceled", map[string]any{"reservationUid": reservation.ReservationUID, "paymentUid": reservation.PaymentUID})
 	w.WriteHeader(http.StatusNoContent)
@@ -407,18 +405,59 @@ func fullAddress(hotel hotelResponse) string {
 	return strings.Join(parts, ", ")
 }
 
-func (h *Handler) cancelPayment(r *http.Request, uid string) (int, error) {
-	if uid == "" {
-		return http.StatusNoContent, nil
-	}
-	return h.do(r, http.MethodDelete, h.cfg.PaymentURL+"/api/v1/payments/"+url.PathEscape(uid), nil, nil)
-}
-
 func (h *Handler) cancelReservation(r *http.Request, uid string) {
 	if uid == "" {
 		return
 	}
 	_, _ = h.do(r, http.MethodDelete, h.cfg.ReservationURL+"/api/v1/reservations/"+url.PathEscape(uid), nil, nil)
+}
+
+func (h *Handler) publishPaymentCancel(r *http.Request, reservation reservationResponse) error {
+	return h.publishPaymentCancelFor(r, reservation.ReservationUID, reservation.PaymentUID)
+}
+
+func (h *Handler) publishPaymentCancelFor(r *http.Request, reservationUID string, paymentUID string) error {
+	claims, _ := auth.FromContext(r.Context())
+	occurredAt := time.Now().UTC()
+	return h.publishSagaEvent(r.Context(), h.cfg.KafkaPaymentCancelTopic, claims.Username, map[string]any{
+		"eventId":        newEventID(),
+		"reservationUid": reservationUID,
+		"paymentUid":     paymentUID,
+		"username":       claims.Username,
+		"occurredAt":     occurredAt.Format(time.RFC3339Nano),
+	})
+}
+
+func (h *Handler) publishReservationCreated(r *http.Request, reservation reservationResponse, price int, discount int) error {
+	claims, _ := auth.FromContext(r.Context())
+	occurredAt := time.Now().UTC()
+	return h.publishSagaEvent(r.Context(), h.cfg.KafkaReservationCreatedTopic, claims.Username, map[string]any{
+		"eventId":        newEventID(),
+		"reservationUid": reservation.ReservationUID,
+		"paymentUid":     reservation.PaymentUID,
+		"username":       claims.Username,
+		"price":          price,
+		"discount":       discount,
+		"occurredAt":     occurredAt.Format(time.RFC3339Nano),
+	})
+}
+
+func (h *Handler) publishReservationCanceled(r *http.Request, reservation reservationResponse) error {
+	claims, _ := auth.FromContext(r.Context())
+	occurredAt := time.Now().UTC()
+	return h.publishSagaEvent(r.Context(), h.cfg.KafkaReservationCanceledTopic, claims.Username, map[string]any{
+		"eventId":        newEventID(),
+		"reservationUid": reservation.ReservationUID,
+		"username":       claims.Username,
+		"occurredAt":     occurredAt.Format(time.RFC3339Nano),
+	})
+}
+
+func (h *Handler) publishSagaEvent(ctx context.Context, topic, username string, payload map[string]any) error {
+	if h.publisher == nil || !h.publisher.Enabled() {
+		return fmt.Errorf("kafka publisher is not configured")
+	}
+	return h.publisher.PublishJSON(ctx, topic, username, payload)
 }
 
 func (h *Handler) publishEvent(r *http.Request, typ string, payload map[string]any) {
@@ -427,49 +466,6 @@ func (h *Handler) publishEvent(r *http.Request, typ string, payload map[string]a
 	_ = h.publisher.Publish(r.Context(), event)
 	body := map[string]any{"type": typ, "username": claims.Username, "payload": payload}
 	_, _ = h.do(r, http.MethodPost, h.cfg.StatisticsURL+"/api/v1/events", body, nil)
-}
-
-func (h *Handler) retryLoyaltyDecrease(authHeader string) {
-	if authHeader == "" {
-		return
-	}
-	go func() {
-		deadline := time.Now().Add(30 * time.Second)
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			var out loyaltyResponse
-			status, err := h.doWithAuth(ctx, authHeader, http.MethodPost, h.cfg.LoyaltyURL+"/api/v1/loyalty/decrease", nil, &out)
-			cancel()
-			if err == nil && status == http.StatusOK {
-				return
-			}
-			if time.Now().After(deadline) {
-				return
-			}
-			time.Sleep(2 * time.Second)
-		}
-	}()
-}
-
-func (h *Handler) retryPaymentCancel(authHeader string, paymentUID string) {
-	if authHeader == "" || paymentUID == "" {
-		return
-	}
-	go func() {
-		deadline := time.Now().Add(45 * time.Second)
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			status, err := h.doWithAuth(ctx, authHeader, http.MethodDelete, h.cfg.PaymentURL+"/api/v1/payments/"+url.PathEscape(paymentUID), nil, nil)
-			cancel()
-			if err == nil && (status == http.StatusNoContent || status == http.StatusNotFound) {
-				return
-			}
-			if time.Now().After(deadline) {
-				return
-			}
-			time.Sleep(2 * time.Second)
-		}
-	}()
 }
 
 func (h *Handler) serviceAvailable(ctx context.Context, target string) bool {
@@ -486,6 +482,20 @@ func (h *Handler) serviceAvailable(ctx context.Context, target string) bool {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode >= 200 && resp.StatusCode < 500
+}
+
+func newEventID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		now := uint64(time.Now().UnixNano())
+		for i := 0; i < 8; i++ {
+			b[i] = byte(now >> (8 * i))
+			b[8+i] = byte(now >> (8 * (7 - i)))
+		}
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func (h *Handler) do(r *http.Request, method, target string, body any, out any) (int, error) {

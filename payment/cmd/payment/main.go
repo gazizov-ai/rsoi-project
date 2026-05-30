@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/segmentio/kafka-go"
 
 	"github.com/gazizov-ai/rsoi-project/common/auth"
 	"github.com/gazizov-ai/rsoi-project/common/httputil"
@@ -46,6 +48,9 @@ func main() {
 	if err := s.migrate(context.Background()); err != nil {
 		log.Fatalf("failed to migrate payment db: %v", err)
 	}
+	if strings.TrimSpace(cfg.KafkaBrokers) != "" {
+		go s.consumePaymentCancel(context.Background(), cfg)
+	}
 
 	validator := auth.NewValidator(cfg.IdentityURL+"/api/v1/jwks", cfg.JWTIssuer)
 	mux := http.NewServeMux()
@@ -76,8 +81,100 @@ CREATE TABLE IF NOT EXISTS payment (
 	price INT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS processed_events (
+	event_id UUID PRIMARY KEY,
+	processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `)
 	return err
+}
+
+type paymentCancelEvent struct {
+	EventID        string    `json:"eventId"`
+	ReservationUID string    `json:"reservationUid"`
+	PaymentUID     string    `json:"paymentUid"`
+	Username       string    `json:"username"`
+	OccurredAt     time.Time `json:"occurredAt"`
+}
+
+func (s *server) consumePaymentCancel(ctx context.Context, cfg config.Config) {
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  splitCSV(cfg.KafkaBrokers),
+		Topic:    cfg.KafkaPaymentCancelTopic,
+		GroupID:  cfg.KafkaGroupID,
+		MinBytes: 1,
+		MaxBytes: 10e6,
+	})
+	defer reader.Close()
+
+	for {
+		msg, err := reader.FetchMessage(ctx)
+		if err != nil {
+			log.Printf("payment kafka read failed: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		var event paymentCancelEvent
+		if err := json.Unmarshal(msg.Value, &event); err != nil {
+			log.Printf("invalid payment cancel event: %v", err)
+			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+		if event.EventID == "" || event.PaymentUID == "" {
+			log.Printf("invalid payment cancel event: missing eventId or paymentUid")
+			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+		if _, err := uuid.Parse(event.EventID); err != nil {
+			log.Printf("invalid payment cancel event: bad eventId %q", event.EventID)
+			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+		if _, err := uuid.Parse(event.PaymentUID); err != nil {
+			log.Printf("invalid payment cancel event: bad paymentUid %q", event.PaymentUID)
+			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+		if err := s.applyPaymentCancel(ctx, event); err != nil {
+			log.Printf("failed to apply payment cancel event %s: %v", event.EventID, err)
+			continue
+		}
+		if err := reader.CommitMessages(ctx, msg); err != nil {
+			log.Printf("failed to commit payment cancel event %s: %v", event.EventID, err)
+		}
+	}
+}
+
+func (s *server) applyPaymentCancel(ctx context.Context, event paymentCancelEvent) error {
+	eventID, err := uuid.Parse(event.EventID)
+	if err != nil {
+		return err
+	}
+	paymentID, err := uuid.Parse(event.PaymentUID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var alreadyProcessed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = $1)`, eventID).Scan(&alreadyProcessed); err != nil {
+		return err
+	}
+	if alreadyProcessed {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE payment SET status = 'CANCELED' WHERE payment_uid = $1`, paymentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO processed_events(event_id) VALUES ($1)`, eventID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *server) create(w http.ResponseWriter, r *http.Request) {
@@ -160,4 +257,16 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), "startedAt", time.Now())))
 	})
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

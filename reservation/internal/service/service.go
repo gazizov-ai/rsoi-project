@@ -44,16 +44,19 @@ func (s *Service) GetHotel(ctx context.Context, uid uuid.UUID, startDate, endDat
 	return s.hotels.GetByUID(ctx, uid, startDate, endDate)
 }
 
-func (s *Service) CreateReservation(ctx context.Context, username string, hotelUID, paymentUID uuid.UUID, startDate, endDate time.Time) (ReservationView, error) {
+func (s *Service) CreateReservation(ctx context.Context, username string, reservationUID, hotelUID, paymentUID uuid.UUID, startDate, endDate time.Time) (ReservationView, error) {
 	if !endDate.After(startDate) {
 		return ReservationView{}, errors.New("endDate must be after startDate")
+	}
+	if reservationUID == uuid.Nil {
+		reservationUID = uuid.New()
 	}
 	hotel, err := s.hotels.GetByUID(ctx, hotelUID, startDate, endDate)
 	if err != nil {
 		return ReservationView{}, err
 	}
 	reservation := &domain.Reservation{
-		ReservationUID: uuid.New(),
+		ReservationUID: reservationUID,
 		Username:       username,
 		PaymentUID:     paymentUID,
 		HotelID:        hotel.ID,

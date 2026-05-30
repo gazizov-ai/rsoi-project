@@ -14,6 +14,11 @@ type Config struct {
 	DatabaseURL string `env:"DB_URL,required"`
 	IdentityURL string `env:"IDENTITY_URL,required"`
 	JWTIssuer   string `env:"JWT_ISSUER" envDefault:"http://localhost:8084"`
+
+	KafkaBrokers                  string `env:"KAFKA_BROKERS" envDefault:""`
+	KafkaReservationCanceledTopic string `env:"KAFKA_RESERVATION_CANCELED_TOPIC" envDefault:"reservation.canceled"`
+	KafkaReservationCreatedTopic  string `env:"KAFKA_RESERVATION_CREATED_TOPIC" envDefault:"reservation.created"`
+	KafkaGroupID                  string `env:"KAFKA_GROUP_ID" envDefault:"loyalty"`
 }
 
 func Load() (Config, error) {

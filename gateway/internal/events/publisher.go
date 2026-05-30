@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -17,7 +18,8 @@ type Event struct {
 }
 
 type Publisher struct {
-	writer *kafka.Writer
+	writer       *kafka.Writer
+	defaultTopic string
 }
 
 func NewPublisher(brokersCSV, topic string) *Publisher {
@@ -26,32 +28,51 @@ func NewPublisher(brokersCSV, topic string) *Publisher {
 		return nil
 	}
 	return &Publisher{
+		defaultTopic: topic,
 		writer: &kafka.Writer{
 			Addr:         kafka.TCP(brokers...),
-			Topic:        topic,
 			Balancer:     &kafka.LeastBytes{},
 			RequiredAcks: kafka.RequireOne,
 		},
 	}
 }
 
+func (p *Publisher) Enabled() bool {
+	return p != nil && p.writer != nil
+}
+
 func (p *Publisher) Publish(ctx context.Context, event Event) error {
-	if p == nil || p.writer == nil {
-		return nil
-	}
+	return p.PublishTo(ctx, p.defaultTopic, event)
+}
+
+func (p *Publisher) PublishTo(ctx context.Context, topic string, event Event) error {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
-	data, err := json.Marshal(event)
+	return p.PublishJSON(ctx, topic, event.Username, event)
+}
+
+func (p *Publisher) PublishJSON(ctx context.Context, topic, key string, value any) error {
+	if p == nil || p.writer == nil {
+		return nil
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = p.defaultTopic
+	}
+	if strings.TrimSpace(topic) == "" {
+		return errors.New("kafka topic is empty")
+	}
+	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return p.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(event.Username),
+		Topic: topic,
+		Key:   []byte(key),
 		Value: data,
-		Time:  event.CreatedAt,
+		Time:  time.Now().UTC(),
 	})
 }
 

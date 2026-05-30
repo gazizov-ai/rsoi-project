@@ -90,6 +90,9 @@ helm upgrade --install payment deploy/helm/app -n "$NAMESPACE" \
   --set-string env.PORT=8060 \
   --set-string env.IDENTITY_URL=http://identity \
   --set-string env.JWT_ISSUER="https://$IDENTITY_HOST" \
+  --set-string env.KAFKA_BROKERS="$KAFKA_BROKERS" \
+  --set-string env.KAFKA_PAYMENT_CANCEL_TOPIC=payment.cancel.requested \
+  --set-string env.KAFKA_GROUP_ID=payment \
   --set-string secretEnv.DB_URL="postgres://$DB_USER:$DB_PASSWORD@postgres:5432/payments?sslmode=disable"
 
 helm upgrade --install loyalty deploy/helm/app -n "$NAMESPACE" \
@@ -100,6 +103,10 @@ helm upgrade --install loyalty deploy/helm/app -n "$NAMESPACE" \
   --set-string env.PORT=8050 \
   --set-string env.IDENTITY_URL=http://identity \
   --set-string env.JWT_ISSUER="https://$IDENTITY_HOST" \
+  --set-string env.KAFKA_BROKERS="$KAFKA_BROKERS" \
+  --set-string env.KAFKA_RESERVATION_CANCELED_TOPIC=reservation.canceled \
+  --set-string env.KAFKA_RESERVATION_CREATED_TOPIC=reservation.created \
+  --set-string env.KAFKA_GROUP_ID=loyalty \
   --set-string secretEnv.DB_URL="postgres://$DB_USER:$DB_PASSWORD@postgres:5432/loyalties?sslmode=disable"
 
 helm upgrade --install statistics deploy/helm/app -n "$NAMESPACE" \
@@ -133,6 +140,9 @@ helm upgrade --install gateway deploy/helm/app -n "$NAMESPACE" \
   --set-string env.UI_URL="https://$APP_HOST" \
   --set-string env.KAFKA_BROKERS="$KAFKA_BROKERS" \
   --set-string env.KAFKA_TOPIC="$KAFKA_TOPIC" \
+  --set-string env.KAFKA_RESERVATION_CANCELED_TOPIC=reservation.canceled \
+  --set-string env.KAFKA_RESERVATION_CREATED_TOPIC=reservation.created \
+  --set-string env.KAFKA_PAYMENT_CANCEL_TOPIC=payment.cancel.requested \
   --set-string secretEnv.CLIENT_SECRET="$CLIENT_SECRET" \
   --set ingress.enabled=true \
   --set ingress.className=nginx \

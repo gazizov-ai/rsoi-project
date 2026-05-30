@@ -14,6 +14,10 @@ type Config struct {
 	DatabaseURL string `env:"DB_URL,required"`
 	IdentityURL string `env:"IDENTITY_URL,required"`
 	JWTIssuer   string `env:"JWT_ISSUER" envDefault:"http://localhost:8084"`
+
+	KafkaBrokers            string `env:"KAFKA_BROKERS" envDefault:""`
+	KafkaPaymentCancelTopic string `env:"KAFKA_PAYMENT_CANCEL_TOPIC" envDefault:"payment.cancel.requested"`
+	KafkaGroupID            string `env:"KAFKA_GROUP_ID" envDefault:"payment"`
 }
 
 func Load() (Config, error) {

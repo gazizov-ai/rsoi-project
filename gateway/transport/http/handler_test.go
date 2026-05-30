@@ -35,3 +35,15 @@ func TestBronzeLoyalty(t *testing.T) {
 		t.Fatalf("bronze loyalty = %+v", got)
 	}
 }
+
+func TestNewEventIDLooksLikeUUID(t *testing.T) {
+	got := newEventID()
+	if len(got) != 36 {
+		t.Fatalf("event id length = %d, want 36: %q", len(got), got)
+	}
+	for _, pos := range []int{8, 13, 18, 23} {
+		if got[pos] != '-' {
+			t.Fatalf("event id %q is missing dash at %d", got, pos)
+		}
+	}
+}

@@ -55,11 +55,15 @@ services:
       DB_URL: postgres://postgres:postgres@postgres:5432/payments?sslmode=disable
       IDENTITY_URL: http://identity:8084
       JWT_ISSUER: http://localhost:8084
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_PAYMENT_CANCEL_TOPIC: payment.cancel.requested
+      KAFKA_GROUP_ID: payment
     ports:
       - "8060:8060"
     depends_on:
       - postgres
       - identity
+      - kafka
     restart: on-failure
 
   loyalty:
@@ -71,11 +75,16 @@ services:
       DB_URL: postgres://postgres:postgres@postgres:5432/loyalties?sslmode=disable
       IDENTITY_URL: http://identity:8084
       JWT_ISSUER: http://localhost:8084
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_RESERVATION_CANCELED_TOPIC: reservation.canceled
+      KAFKA_RESERVATION_CREATED_TOPIC: reservation.created
+      KAFKA_GROUP_ID: loyalty
     ports:
       - "8050:8050"
     depends_on:
       - postgres
       - identity
+      - kafka
     restart: on-failure
 
   statistics:
@@ -89,6 +98,9 @@ services:
       JWT_ISSUER: http://localhost:8084
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC: rsoi.events
+      KAFKA_RESERVATION_CANCELED_TOPIC: reservation.canceled
+      KAFKA_RESERVATION_CREATED_TOPIC: reservation.created
+      KAFKA_PAYMENT_CANCEL_TOPIC: payment.cancel.requested
       KAFKA_GROUP_ID: statistics
     ports:
       - "8040:8040"
